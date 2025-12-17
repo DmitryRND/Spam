@@ -1,4 +1,8 @@
 .venv/
 cred/
 token.json
+.DS_Store
+__pycache__/
+data/
+*.db
 _pycache_/
