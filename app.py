@@ -355,9 +355,13 @@ PAGE_TEMPLATE = """
               <div class="actions" style="margin-top:8px;">
                 <button type="button" onclick="copyValue('temp_address')">Copy address</button>
                 <button type="button" onclick="copyValue('advanced_token')">Copy token</button>
+                {% if results.advanced_pending %}
                 <span class="timer">Expires in: <strong id="countdown">--:--</strong></span>
+                {% endif %}
               </div>
+              {% if results.advanced_pending %}
               <div class="progress"><div class="bar" id="countdown_bar"></div></div>
+              {% endif %}
             </div>
             {% endif %}
           </div>
@@ -509,9 +513,10 @@ PAGE_TEMPLATE = """
 
     setActiveTab(activeTab || "simple");
 
+    const showTimer = {{ "true" if results and results.advanced_pending else "false" }};
     const expiresAt = {{ results.advanced_meta.expires_at_ts if results and results.advanced_meta else "null" }};
     const createdAt = {{ results.advanced_meta.created_at_ts if results and results.advanced_meta else "null" }};
-    if (expiresAt && createdAt) {
+    if (showTimer && expiresAt && createdAt) {
       const countdown = document.getElementById("countdown");
       const bar = document.getElementById("countdown_bar");
       const tick = () => {
