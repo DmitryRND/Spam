@@ -90,6 +90,7 @@ ADVANCED_GUIDANCE = [
     "Send a test email from your domain to that address.",
     "Wait up to 10 minutes for delivery; refresh to see results.",
     "We analyze headers (SPF/DKIM/DMARC) and content for spam signals.",
+    "Save the inbox token if you want to check results later.",
 ]
 
 PAGE_TEMPLATE = """
@@ -274,6 +275,21 @@ PAGE_TEMPLATE = """
       color: var(--muted);
     }
     .timer strong { color: var(--text); }
+    .progress {
+      width: 220px;
+      height: 8px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.08);
+      overflow: hidden;
+      border: 1px solid var(--border);
+      margin-top: 8px;
+    }
+    .progress .bar {
+      height: 100%;
+      background: linear-gradient(120deg, #2fd17a, #62f5c5);
+      width: 0%;
+      transition: width 0.3s ease;
+    }
   </style>
 </head>
 <body>
@@ -325,7 +341,7 @@ PAGE_TEMPLATE = """
               <p class="muted">Generate a temporary inbox on {{ service_domain }} and send a test message to it.</p>
             </div>
             <div>
-              <label for="advanced_token">Temp inbox token</label>
+              <label for="advanced_token">Inbox token (for checking results)</label>
               <input id="advanced_token" name="advanced_token" type="text" placeholder="token" value="{{ form.advanced_token }}">
             </div>
             <div class="actions">
@@ -334,8 +350,14 @@ PAGE_TEMPLATE = """
             </div>
             {% if results and results.advanced_meta %}
             <div style="grid-column: 1 / -1;">
-              <span class="timer">Expires in: <strong id="countdown">--:--</strong></span>
-              <span class="muted" style="margin-left:10px;">{{ results.advanced_meta.address }}</span>
+              <label for="temp_address">Temporary inbox address</label>
+              <input id="temp_address" type="text" readonly value="{{ results.advanced_meta.address }}">
+              <div class="actions" style="margin-top:8px;">
+                <button type="button" onclick="copyValue('temp_address')">Copy address</button>
+                <button type="button" onclick="copyValue('advanced_token')">Copy token</button>
+                <span class="timer">Expires in: <strong id="countdown">--:--</strong></span>
+              </div>
+              <div class="progress"><div class="bar" id="countdown_bar"></div></div>
             </div>
             {% endif %}
           </div>
@@ -347,7 +369,7 @@ PAGE_TEMPLATE = """
     </section>
 
     {% if results %}
-      <section class="card">
+      <section class="card" id="results_section" data-result-tab="{{ active_tab }}">
         {% if active_tab == "simple" %}
           {% if results.domain or results.ip %}
           <div class="result-meta">
@@ -464,6 +486,19 @@ PAGE_TEMPLATE = """
       document.querySelectorAll(".tab-panel").forEach((panel) => {
         panel.classList.toggle("active", panel.dataset.panel === tab);
       });
+      if (tab === "advanced") {
+        ["domain", "ip", "dkim_selector", "nameservers"].forEach((id) => {
+          const el = document.getElementById(id);
+          if (el) el.value = "";
+        });
+        const skip = document.querySelector("input[name='skip_rbl']");
+        if (skip) skip.checked = false;
+      }
+      const resultsSection = document.getElementById("results_section");
+      if (resultsSection) {
+        resultsSection.style.display =
+          resultsSection.dataset.resultTab === tab ? "block" : "none";
+      }
     }
 
     document.querySelectorAll(".tab-button").forEach((btn) => {
@@ -475,15 +510,22 @@ PAGE_TEMPLATE = """
     setActiveTab(activeTab || "simple");
 
     const expiresAt = {{ results.advanced_meta.expires_at_ts if results and results.advanced_meta else "null" }};
-    if (expiresAt) {
+    const createdAt = {{ results.advanced_meta.created_at_ts if results and results.advanced_meta else "null" }};
+    if (expiresAt && createdAt) {
       const countdown = document.getElementById("countdown");
+      const bar = document.getElementById("countdown_bar");
       const tick = () => {
         const now = Math.floor(Date.now() / 1000);
         const remaining = Math.max(0, expiresAt - now);
+        const total = Math.max(1, expiresAt - createdAt);
+        const pct = Math.max(0, Math.min(100, Math.round((remaining / total) * 100)));
         const minutes = Math.floor(remaining / 60);
         const seconds = remaining % 60;
         if (countdown) {
           countdown.textContent = `${minutes}:${seconds.toString().padStart(2, "0")}`;
+        }
+        if (bar) {
+          bar.style.width = `${pct}%`;
         }
       };
       tick();
@@ -496,6 +538,18 @@ PAGE_TEMPLATE = """
         setAction("advanced_check");
         formEl.submit();
       }, 60000);
+    }
+
+    function copyValue(id) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const value = el.value || el.textContent || "";
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(value).catch(() => {});
+      } else if (el.select) {
+        el.select();
+        document.execCommand("copy");
+      }
     }
   </script>
 </body>
@@ -1090,7 +1144,9 @@ def create_app() -> Flask:
                     results["advanced_meta"] = {
                         "address": mailbox["address"],
                         "expires_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(mailbox["expires_at"])),
+                        "created_at_ts": mailbox["created_at"],
                         "expires_at_ts": mailbox["expires_at"],
+                        "token": mailbox["token"],
                     }
                     results["advanced"] = [
                         CheckResult("Inbox", "INFO", "Waiting for message (refresh to check)")
@@ -1105,7 +1161,9 @@ def create_app() -> Flask:
                         results["advanced_meta"] = {
                             "address": mailbox["address"],
                             "expires_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(mailbox["expires_at"])),
+                            "created_at_ts": mailbox["created_at"],
                             "expires_at_ts": mailbox["expires_at"],
+                            "token": mailbox["token"],
                         }
                         message = get_latest_message(DB_PATH, mailbox["id"])
                         if not message:
