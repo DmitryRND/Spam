@@ -1,4 +1,5 @@
 import argparse
+import ssl
 import time
 from pathlib import Path
 
@@ -59,12 +60,18 @@ def main() -> None:
         default="data/spamcheck.db",
         help="Path to sqlite database (default: data/spamcheck.db)",
     )
+    parser.add_argument("--tls-cert", help="Path to TLS certificate (optional)")
+    parser.add_argument("--tls-key", help="Path to TLS private key (optional)")
     args = parser.parse_args()
 
     db_path = Path(args.db_path)
     init_db(db_path)
     handler = TempInboxHandler(db_path, args.domain)
-    controller = Controller(handler, hostname=args.host, port=args.port)
+    tls_context = None
+    if args.tls_cert and args.tls_key:
+        tls_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+        tls_context.load_cert_chain(args.tls_cert, args.tls_key)
+    controller = Controller(handler, hostname=args.host, port=args.port, tls_context=tls_context)
     controller.start()
     print(f"SMTP receiver listening on {args.host}:{args.port} for {args.domain}")
     try:

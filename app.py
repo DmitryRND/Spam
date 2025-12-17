@@ -140,6 +140,27 @@ PAGE_TEMPLATE = """
       margin-bottom: 16px;
       box-shadow: 0 14px 50px rgba(0,0,0,0.35);
     }
+    .tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+    .tab-button {
+      padding: 8px 14px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: #0b1224;
+      color: var(--muted);
+      cursor: pointer;
+      font-weight: 600;
+    }
+    .tab-button.active {
+      color: #0a1220;
+      background: linear-gradient(120deg, #2fd17a, #62f5c5);
+      border-color: transparent;
+    }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
     form.grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -241,6 +262,18 @@ PAGE_TEMPLATE = """
       font-size: 14px;
       resize: vertical;
     }
+    .timer {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid var(--border);
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .timer strong { color: var(--text); }
   </style>
 </head>
 <body>
@@ -251,39 +284,61 @@ PAGE_TEMPLATE = """
     </header>
 
     <section class="card">
-      <form method="POST" class="grid">
-        <div>
-          <label for="domain">Domain *</label>
-          <input id="domain" name="domain" type="text" placeholder="example.com" value="{{ form.domain }}">
+      <form method="POST">
+        <input type="hidden" id="tab" name="tab" value="{{ active_tab }}">
+        <input type="hidden" id="action_auto" name="action_auto" value="">
+        <div class="tabs">
+          <button type="button" class="tab-button" data-tab="simple">Simple check</button>
+          <button type="button" class="tab-button" data-tab="advanced">Advanced inbox</button>
         </div>
-        <div>
-          <label for="ip">IP (optional, used for PTR/RBL)</label>
-          <input id="ip" name="ip" type="text" placeholder="auto from A/AAAA" value="{{ form.ip }}">
+        <div class="tab-panel" data-panel="simple">
+          <div class="grid">
+            <div>
+              <label for="domain">Domain *</label>
+              <input id="domain" name="domain" type="text" placeholder="example.com" value="{{ form.domain }}">
+            </div>
+            <div>
+              <label for="ip">IP (optional, used for PTR/RBL)</label>
+              <input id="ip" name="ip" type="text" placeholder="auto from A/AAAA" value="{{ form.ip }}">
+            </div>
+            <div>
+              <label for="dkim_selector">DKIM selector (optional)</label>
+              <input id="dkim_selector" name="dkim_selector" type="text" placeholder="default, mail, etc." value="{{ form.dkim_selector }}">
+            </div>
+            <div>
+              <label for="nameservers">Custom nameservers (comma separated)</label>
+              <input id="nameservers" name="nameservers" type="text" placeholder="8.8.8.8,1.1.1.1" value="{{ form.nameservers }}">
+            </div>
+            <div class="actions">
+              <button type="submit" name="action" value="checks" onclick="setAction('checks')">Run checks</button>
+              <label class="checkbox">
+                <input type="checkbox" name="skip_rbl" {% if form.skip_rbl %}checked{% endif %}>
+                Skip RBL lookups
+              </label>
+            </div>
+          </div>
         </div>
-        <div>
-          <label for="dkim_selector">DKIM selector (optional)</label>
-          <input id="dkim_selector" name="dkim_selector" type="text" placeholder="default, mail, etc." value="{{ form.dkim_selector }}">
-        </div>
-        <div>
-          <label for="nameservers">Custom nameservers (comma separated)</label>
-          <input id="nameservers" name="nameservers" type="text" placeholder="8.8.8.8,1.1.1.1" value="{{ form.nameservers }}">
-        </div>
-        <div class="actions">
-          <button type="submit" name="action" value="checks">Run checks</button>
-          <button type="submit" name="action" value="advanced_create">Generate temp inbox</button>
-          <button type="submit" name="action" value="advanced_check">Check inbox</button>
-          <label class="checkbox">
-            <input type="checkbox" name="skip_rbl" {% if form.skip_rbl %}checked{% endif %}>
-            Skip RBL lookups
-          </label>
-        </div>
-        <div style="grid-column: 1 / -1; margin-top: 8px;">
-          <h3>Advanced check (temporary inbox)</h3>
-          <p class="muted">Generate a temporary inbox on {{ service_domain }} and send a test message to it.</p>
-        </div>
-        <div>
-          <label for="advanced_token">Temp inbox token</label>
-          <input id="advanced_token" name="advanced_token" type="text" placeholder="token" value="{{ form.advanced_token }}">
+        <div class="tab-panel" data-panel="advanced">
+          <div class="grid">
+            <div style="grid-column: 1 / -1;">
+              <h3>Advanced check (temporary inbox)</h3>
+              <p class="muted">Generate a temporary inbox on {{ service_domain }} and send a test message to it.</p>
+            </div>
+            <div>
+              <label for="advanced_token">Temp inbox token</label>
+              <input id="advanced_token" name="advanced_token" type="text" placeholder="token" value="{{ form.advanced_token }}">
+            </div>
+            <div class="actions">
+              <button type="submit" name="action" value="advanced_create" onclick="setAction('advanced_create')">Generate inbox</button>
+              <button type="submit" name="action" value="advanced_check" onclick="setAction('advanced_check')">Check inbox</button>
+            </div>
+            {% if results and results.advanced_meta %}
+            <div style="grid-column: 1 / -1;">
+              <span class="timer">Expires in: <strong id="countdown">--:--</strong></span>
+              <span class="muted" style="margin-left:10px;">{{ results.advanced_meta.address }}</span>
+            </div>
+            {% endif %}
+          </div>
         </div>
       </form>
       {% if error %}
@@ -293,84 +348,88 @@ PAGE_TEMPLATE = """
 
     {% if results %}
       <section class="card">
-        {% if results.domain or results.ip %}
-        <div class="result-meta">
-          {% if results.domain %}
-          <div><span class="muted">Domain:</span> {{ results.domain }}</div>
-          {% endif %}
-          {% if results.ip %}
-          <div><span class="muted">IP used:</span> {{ results.ip }}</div>
-          {% endif %}
-        </div>
-        {% endif %}
-        {% if results.technical %}
-        <div class="result-grid">
-          {% for check in results.technical %}
-            <div class="pill {{ check.status|lower }}">
-              <div class="title">{{ check.name }} <span class="status">{{ check.status }}</span></div>
-              <div class="detail">{{ check.detail }}</div>
-            </div>
-          {% endfor %}
-        </div>
-        {% endif %}
-        {% if results.rbl %}
-        <h3>RBL / DNSBL</h3>
-        <div class="result-grid">
-          {% for check in results.rbl %}
-            <div class="pill {{ check.status|lower }}">
-              <div class="title">{{ check.name }} <span class="status">{{ check.status }}</span></div>
-              <div class="detail">{{ check.detail }}</div>
-            </div>
-          {% endfor %}
-        </div>
-        {% endif %}
-        {% if results.surbl %}
-        <h3>SURBL (domain URI lists)</h3>
-        <div class="result-grid">
-          {% for check in results.surbl %}
-            <div class="pill {{ check.status|lower }}">
-              <div class="title">{{ check.name }} <span class="status">{{ check.status }}</span></div>
-              <div class="detail">{{ check.detail }}</div>
-            </div>
-          {% endfor %}
-        </div>
-        {% endif %}
-        {% if results.advanced %}
-        <h3>Advanced analysis</h3>
-        <div class="result-grid">
-          {% for check in results.advanced %}
-            <div class="pill {{ check.status|lower }}">
-              <div class="title">{{ check.name }} <span class="status">{{ check.status }}</span></div>
-              <div class="detail">{{ check.detail }}</div>
-            </div>
-          {% endfor %}
-        </div>
-        {% endif %}
-        {% if results.flags_red or results.flags_green %}
-        <div class="result-grid" style="margin-top: 12px;">
-          {% if results.flags_red %}
-          <div class="pill fail">
-            <div class="title">Red flags</div>
-            <div class="detail">
-              {{ results.flags_red|join(' | ') }}
-            </div>
+        {% if active_tab == "simple" %}
+          {% if results.domain or results.ip %}
+          <div class="result-meta">
+            {% if results.domain %}
+            <div><span class="muted">Domain:</span> {{ results.domain }}</div>
+            {% endif %}
+            {% if results.ip %}
+            <div><span class="muted">IP used:</span> {{ results.ip }}</div>
+            {% endif %}
           </div>
           {% endif %}
-          {% if results.flags_green %}
-          <div class="pill pass">
-            <div class="title">Green flags</div>
-            <div class="detail">
-              {{ results.flags_green|join(' | ') }}
-            </div>
+          {% if results.technical %}
+          <div class="result-grid">
+            {% for check in results.technical %}
+              <div class="pill {{ check.status|lower }}">
+                <div class="title">{{ check.name }} <span class="status">{{ check.status }}</span></div>
+                <div class="detail">{{ check.detail }}</div>
+              </div>
+            {% endfor %}
           </div>
           {% endif %}
-        </div>
+          {% if results.rbl %}
+          <h3>RBL / DNSBL</h3>
+          <div class="result-grid">
+            {% for check in results.rbl %}
+              <div class="pill {{ check.status|lower }}">
+                <div class="title">{{ check.name }} <span class="status">{{ check.status }}</span></div>
+                <div class="detail">{{ check.detail }}</div>
+              </div>
+            {% endfor %}
+          </div>
+          {% endif %}
+          {% if results.surbl %}
+          <h3>SURBL (domain URI lists)</h3>
+          <div class="result-grid">
+            {% for check in results.surbl %}
+              <div class="pill {{ check.status|lower }}">
+                <div class="title">{{ check.name }} <span class="status">{{ check.status }}</span></div>
+                <div class="detail">{{ check.detail }}</div>
+              </div>
+            {% endfor %}
+          </div>
+          {% endif %}
         {% endif %}
-        {% if results.ai_summary %}
-          <p class="muted">AI summary: {{ results.ai_summary }}</p>
-        {% endif %}
-        {% if results.advanced_meta %}
-          <p class="muted">Inbox: {{ results.advanced_meta.address }} | Expires: {{ results.advanced_meta.expires_at }}</p>
+        {% if active_tab == "advanced" %}
+          {% if results.advanced %}
+          <h3>Advanced analysis</h3>
+          <div class="result-grid">
+            {% for check in results.advanced %}
+              <div class="pill {{ check.status|lower }}">
+                <div class="title">{{ check.name }} <span class="status">{{ check.status }}</span></div>
+                <div class="detail">{{ check.detail }}</div>
+              </div>
+            {% endfor %}
+          </div>
+          {% endif %}
+          {% if results.flags_red or results.flags_green %}
+          <div class="result-grid" style="margin-top: 12px;">
+            {% if results.flags_red %}
+            <div class="pill fail">
+              <div class="title">Red flags</div>
+              <div class="detail">
+                {{ results.flags_red|join(' | ') }}
+              </div>
+            </div>
+            {% endif %}
+            {% if results.flags_green %}
+            <div class="pill pass">
+              <div class="title">Green flags</div>
+              <div class="detail">
+                {{ results.flags_green|join(' | ') }}
+              </div>
+            </div>
+            {% endif %}
+          </div>
+          {% endif %}
+          {% if results.ai_summary %}
+            <p class="muted">AI summary: {{ results.ai_summary }}</p>
+          {% endif %}
+          {% if results.advanced_meta %}
+            <p class="muted">Inbox: {{ results.advanced_meta.address }} | Expires: {{ results.advanced_meta.expires_at }}</p>
+          {% endif %}
         {% endif %}
       </section>
     {% endif %}
@@ -385,6 +444,60 @@ PAGE_TEMPLATE = """
       <p class="muted">Temporary inboxes expire after 10 minutes. Send one test message per token.</p>
     </section>
   </main>
+  <script>
+    const activeTab = "{{ active_tab }}";
+    const tabInput = document.getElementById("tab");
+    const actionAuto = document.getElementById("action_auto");
+    const formEl = tabInput ? tabInput.closest("form") : null;
+
+    function setAction(action) {
+      if (actionAuto) {
+        actionAuto.value = action;
+      }
+    }
+
+    function setActiveTab(tab) {
+      if (tabInput) tabInput.value = tab;
+      document.querySelectorAll(".tab-button").forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.tab === tab);
+      });
+      document.querySelectorAll(".tab-panel").forEach((panel) => {
+        panel.classList.toggle("active", panel.dataset.panel === tab);
+      });
+    }
+
+    document.querySelectorAll(".tab-button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        setActiveTab(btn.dataset.tab);
+      });
+    });
+
+    setActiveTab(activeTab || "simple");
+
+    const expiresAt = {{ results.advanced_meta.expires_at_ts if results and results.advanced_meta else "null" }};
+    if (expiresAt) {
+      const countdown = document.getElementById("countdown");
+      const tick = () => {
+        const now = Math.floor(Date.now() / 1000);
+        const remaining = Math.max(0, expiresAt - now);
+        const minutes = Math.floor(remaining / 60);
+        const seconds = remaining % 60;
+        if (countdown) {
+          countdown.textContent = `${minutes}:${seconds.toString().padStart(2, "0")}`;
+        }
+      };
+      tick();
+      setInterval(tick, 1000);
+    }
+
+    const autoPoll = {{ "true" if results and results.advanced_pending else "false" }};
+    if (autoPoll && activeTab === "advanced" && formEl) {
+      setTimeout(() => {
+        setAction("advanced_check");
+        formEl.submit();
+      }, 60000);
+    }
+  </script>
 </body>
 </html>
 """
@@ -922,7 +1035,10 @@ def create_app() -> Flask:
 
     @app.route("/", methods=["GET", "POST"])
     def index():
-        action = request.form.get("action", "checks")
+        action = request.form.get("action") or request.form.get("action_auto") or "checks"
+        active_tab = request.form.get("tab") or request.args.get("tab") or "simple"
+        if action.startswith("advanced"):
+            active_tab = "advanced"
         purge_expired(DB_PATH)
         form = {
             "domain": request.form.get("domain", "").strip(),
@@ -946,6 +1062,7 @@ def create_app() -> Flask:
                     "surbl": [],
                     "advanced": [],
                     "advanced_meta": None,
+                    "advanced_pending": False,
                     "flags_red": [],
                     "flags_green": [],
                     "ai_summary": "",
@@ -973,10 +1090,12 @@ def create_app() -> Flask:
                     results["advanced_meta"] = {
                         "address": mailbox["address"],
                         "expires_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(mailbox["expires_at"])),
+                        "expires_at_ts": mailbox["expires_at"],
                     }
                     results["advanced"] = [
                         CheckResult("Inbox", "INFO", "Waiting for message (refresh to check)")
                     ]
+                    results["advanced_pending"] = True
                 if action == "advanced_check":
                     token = form["advanced_token"]
                     mailbox = get_mailbox_by_token(DB_PATH, token) if token else None
@@ -986,12 +1105,14 @@ def create_app() -> Flask:
                         results["advanced_meta"] = {
                             "address": mailbox["address"],
                             "expires_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(mailbox["expires_at"])),
+                            "expires_at_ts": mailbox["expires_at"],
                         }
                         message = get_latest_message(DB_PATH, mailbox["id"])
                         if not message:
                             results["advanced"] = [
                                 CheckResult("Inbox", "WARN", "No message received yet.")
                             ]
+                            results["advanced_pending"] = True
                         else:
                             if message.get("analysis_json"):
                                 analysis = json.loads(message["analysis_json"])
@@ -999,6 +1120,7 @@ def create_app() -> Flask:
                                 results["flags_red"] = analysis.get("red_flags", [])
                                 results["flags_green"] = analysis.get("green_flags", [])
                                 results["ai_summary"] = analysis.get("ai_summary", "")
+                                results["advanced_pending"] = False
                             else:
                                 analysis = analyze_message(
                                     message["raw"],
@@ -1022,12 +1144,14 @@ def create_app() -> Flask:
                                 results["flags_red"] = analysis["red_flags"]
                                 results["flags_green"] = analysis["green_flags"]
                                 results["ai_summary"] = analysis["ai_summary"]
+                                results["advanced_pending"] = False
         return render_template_string(
             PAGE_TEMPLATE,
             form=form,
             results=results,
             guidance_advanced=ADVANCED_GUIDANCE,
             service_domain=SCHECK_DOMAIN,
+            active_tab=active_tab,
             error=error,
         )
 

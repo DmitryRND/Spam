@@ -1,3 +1,4 @@
+.venv/
+cred/
 token.json
-cred/client_secret_1002763321370-cajmiogi08lbddkdae70q2jsbf5j71h5.apps.googleusercontent.com.json
-cred/client_secret_1002763321370-sfn4fahot2th507as1n9g5q6gtkmo38l.apps.googleusercontent.com.json
+_pycache_/
